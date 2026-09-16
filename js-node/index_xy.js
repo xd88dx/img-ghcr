@@ -16,13 +16,15 @@ const NAME = process.env.NAME || 'js-node' // 节点名称
 const CFIP = process.env.CFIP || 'mfa.gov.ua' // 优选域名或IP
 const CFPORT = process.env.CFPORT || 443 // 优选域名或IP的对应端口
 const UPLOAD_URL = process.env.UPLOAD_URL || '' // 节点或订阅自动上传地址,需填写部署Merge-sub后的首页地址
+const PROJECT_URL = process.env.PROJECT_URL || '' // 项目地址,用于自动保活或上传订阅
+const AUTO_ACCESS = process.env.AUTO_ACCESS || false // 是否开启自动访问,用于保活
 const FILE_PATH = process.env.FILE_PATH || '.npm' // 项目缓存目录,留空不输出文件
 
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '' // 哪吒v1格式:nz.abc.com:8008;哪吒v0格式:nz.abc.com
 const NEZHA_PORT = process.env.NEZHA_PORT || '' // 哪吒v1请留空;哪吒v0需填写
 const NEZHA_KEY = process.env.NEZHA_KEY || '' // 哪吒v1的NZ_CLIENT_SECRET;哪吒v0的agent密钥
 
-const UUID = process.env.UUID || '' // 节点UUID
+const UUID = process.env.UUID || '' // 项目和节点UUID
 const ARGO_AUTH = process.env.ARGO_AUTH || '' // 固定隧道密钥
 const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '' // 固定隧道域名
 const ARGO_PORT = process.env.ARGO_PORT || 58081 // 固定隧道端口
@@ -836,7 +838,32 @@ trojan://${UUID}@${CFIP}:${CFPORT}?security=tls&sni=${argoDomain}&fp=firefox&typ
 
 // 自动上传节点或订阅
 async function uploadNodes() {
-  if (UPLOAD_URL) {
+  if (UPLOAD_URL && PROJECT_URL) {
+    const subscriptionUrl = `${PROJECT_URL}/${SUB_PATH}`
+    const jsonData = {
+      subscription: [subscriptionUrl]
+    }
+    try {
+      const response = await axios.post(`${UPLOAD_URL}/api/add-subscriptions`, jsonData, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response && response.status === 200) {
+        console.log('Subscription uploaded successfully')
+        return response
+      } else {
+        return null
+      }
+    } catch (error) {
+      if (error.response) {
+        if (error.response.status === 400) {
+          // console.error('Subscription already exists');
+        }
+      }
+    }
+  } else if (UPLOAD_URL) {
     if (!fs.existsSync(listPath)) return
     const content = fs.readFileSync(listPath, 'utf-8')
     const nodes = content.split('\n').filter((line) => /(vless|vmess|trojan|hysteria2|socks):\/\//.test(line))
@@ -914,6 +941,33 @@ async function sendTelegram() {
   }
 }
 
+// 自动访问项目URL
+async function AddVisitTask() {
+  if (!AUTO_ACCESS || !PROJECT_URL) {
+    console.log('Skipping adding automatic access task')
+    return
+  }
+
+  try {
+    const response = await axios.post(
+      'https://oooo.serv00.net/add-url',
+      {
+        url: PROJECT_URL
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    console.log(`automatic access task added successfully`)
+    return response
+  } catch (error) {
+    console.error(`Add automatic access task faild: ${error.message}`)
+    return null
+  }
+}
+
 // 主运行逻辑
 async function startserver() {
   try {
@@ -935,6 +989,7 @@ async function startserver() {
     await downloadFilesAndRun()
     await extractDomains()
     await sendTelegram()
+    await AddVisitTask()
   } catch (error) {
     console.error('Error in startserver:', error)
   }

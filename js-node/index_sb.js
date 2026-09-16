@@ -21,8 +21,8 @@ const config = {
   NEZHA_PORT: process.env.NEZHA_PORT || '', // 哪吒v1请留空;哪吒v0需填写
   NEZHA_KEY: process.env.NEZHA_KEY || '', // 哪吒v1的NZ_CLIENT_SECRET;哪吒v0的agent密钥
 
+  UUID: process.env.UUID || '', // 项目和节点UUID
   DISABLE_ARGO: process.env.DISABLE_ARGO || 'false', // 是否禁用argo
-  UUID: process.env.UUID || '', // // 节点UUID
   ARGO_AUTH: process.env.ARGO_AUTH || '', // 固定隧道密钥
   ARGO_DOMAIN: process.env.ARGO_DOMAIN || '', // 固定隧道域名
   ARGO_PORT: process.env.ARGO_PORT || '58081', // 固定隧道端口
