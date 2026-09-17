@@ -6,9 +6,7 @@ COPY index.js index.html package.json package-lock.json ./
 
 EXPOSE 3000/tcp
 
-RUN apk update && apk upgrade &&\
-    apk add --no-cache openssl curl gcompat iproute2 coreutils &&\
-    apk add --no-cache bash &&\
+RUN apk update && apk add --no-cache bash openssl curl &&\
     chmod +x index.js &&\
     npm install
 
