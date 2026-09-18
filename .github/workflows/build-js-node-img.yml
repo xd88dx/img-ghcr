@@ -2,10 +2,20 @@ name: Build and Push Docker Image
 
 on:
   workflow_dispatch:
+    inputs:
+      image:
+        description: 'Docker Image Name'
+        required: true
+        type: string
+      tag:
+        description: 'Docker Tag Name'
+        required: true
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
       packages: write
@@ -31,7 +41,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/tjn:railway_ws
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}:${{ inputs.tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=HTTP Server
