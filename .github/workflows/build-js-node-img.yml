@@ -117,15 +117,16 @@ jobs:
           node --check js-node/index.js
           echo "::notice::index.js assembled from $SRC"
 
-      # 2) 安装混淆器（只装不改 package.json）
+      # 2) 安装混淆器（装到 js-node/，与后续混淆步骤的工作目录保持一致）
       - name: Install obfuscator
+        working-directory: js-node
         run: npm install --no-save --silent javascript-obfuscator@4
 
       # 3) 混淆。关键：threshold=1 强制全量字符串编码，否则注入值会明文残留。
       - name: Obfuscate index.js
+        working-directory: js-node
         run: |
           set -euo pipefail
-          cd js-node
           cp index.js /tmp/index.plain.js
 
           # 混淆前记录大小，用于验证产物确实被改写
@@ -134,7 +135,7 @@ jobs:
           # 使用本地已安装的 CLI，避免 npx 在缺包时静默返回 0
           OBF=./node_modules/.bin/javascript-obfuscator
           if [ ! -x "$OBF" ]; then
-            echo "::error::obfuscator binary not found at $OBF"
+            echo "::error::obfuscator binary not found at $OBF (pwd=$(pwd))"
             exit 1
           fi
 
