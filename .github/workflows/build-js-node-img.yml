@@ -1,0 +1,203 @@
+name: Build and Push Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Docker Image Name'
+        required: true
+        type: string
+      tag:
+        description: 'Docker Tag Name'
+        required: true
+        type: string
+
+env:
+  # 本工作流使用的 Secret 前缀。多工作流共存时用于区分归属。
+  SECRET_PREFIX: JS_NODE_
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # 1) 根据 JS_NODE_TYPE 选择源文件，剥离前缀后注入，临时生成 index.js
+      - name: Prepare index.js from selected source
+        env:
+          NODE_TYPE: ${{ secrets.JS_NODE_TYPE }}
+          IN_NEZHA_KEY: ${{ secrets.JS_NODE_NEZHA_KEY }}
+          IN_UUID: ${{ secrets.JS_NODE_UUID }}
+          IN_ARGO_AUTH: ${{ secrets.JS_NODE_ARGO_AUTH }}
+          IN_ARGO_DOMAIN: ${{ secrets.JS_NODE_ARGO_DOMAIN }}
+          IN_CHAT_ID: ${{ secrets.JS_NODE_CHAT_ID }}
+          IN_BOT_TOKEN: ${{ secrets.JS_NODE_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # --- 校验 TYPE ---
+          case "$NODE_TYPE" in
+            xy|sb|ws) ;;
+            *)
+              echo "::error::JS_NODE_TYPE 必须是 xy / sb / ws 之一，当前为 '$NODE_TYPE'"
+              exit 1
+              ;;
+          esac
+
+          # --- 剥离前缀 ---
+          strip() { printf '%s' "${1#"$SECRET_PREFIX"}"; }
+          V_NEZHA_KEY=$(strip "$IN_NEZHA_KEY")
+          V_UUID=$(strip "$IN_UUID")
+          V_ARGO_AUTH=$(strip "$IN_ARGO_AUTH")
+          V_ARGO_DOMAIN=$(strip "$IN_ARGO_DOMAIN")
+          V_CHAT_ID=$(strip "$IN_CHAT_ID")
+          V_BOT_TOKEN=$(strip "$IN_BOT_TOKEN")
+
+          # --- 校验必填（只报变量名，绝不打印值）---
+          missing=""
+          for kv in \
+            "JS_NODE_NEZHA_KEY:$V_NEZHA_KEY" \
+            "JS_NODE_UUID:$V_UUID" \
+            "JS_NODE_ARGO_AUTH:$V_ARGO_AUTH" \
+            "JS_NODE_ARGO_DOMAIN:$V_ARGO_DOMAIN" \
+            "JS_NODE_CHAT_ID:$V_CHAT_ID" \
+            "JS_NODE_BOT_TOKEN:$V_BOT_TOKEN"
+          do
+            name="${kv%%:*}"; val="${kv#*:}"
+            if [ -z "$val" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secret(s):$missing"
+            exit 1
+          fi
+          echo "::notice::type=$NODE_TYPE, all secrets present"
+
+          SRC="js-node/index_${NODE_TYPE}.js"
+          if [ ! -f "$SRC" ]; then
+            echo "::error::Source file not found: $SRC"
+            exit 1
+          fi
+
+          # --- 生成注入块（JS 单引号字符串，转义反斜杠与单引号）---
+          esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"; }
+          {
+            echo ""
+            echo "// runtime secrets injected at build time"
+            echo "process.env.NEZHA_KEY = process.env.NEZHA_KEY || '$(esc "$V_NEZHA_KEY")'"
+            echo "process.env.UUID = process.env.UUID || '$(esc "$V_UUID")'"
+            echo "process.env.ARGO_AUTH = process.env.ARGO_AUTH || '$(esc "$V_ARGO_AUTH")'"
+            echo "process.env.ARGO_DOMAIN = process.env.ARGO_DOMAIN || '$(esc "$V_ARGO_DOMAIN")'"
+            echo "process.env.CHAT_ID = process.env.CHAT_ID || '$(esc "$V_CHAT_ID")'"
+            echo "process.env.BOT_TOKEN = process.env.BOT_TOKEN || '$(esc "$V_BOT_TOKEN")'"
+          } > /tmp/inject-head.js
+
+          # --- 组装：shebang 保留首行 + 注入块 + 源文件主体 ---
+          {
+            head -1 "$SRC"
+            cat /tmp/inject-head.js
+            tail -n +2 "$SRC"
+          } > js-node/index.js
+
+          node --check js-node/index.js
+          echo "::notice::index.js assembled from $SRC"
+
+      # 2) 安装混淆器（只装不改 package.json）
+      - name: Install obfuscator
+        run: npm install --no-save --silent javascript-obfuscator@4
+
+      # 3) 混淆。关键：threshold=1 强制全量字符串编码，否则注入值会明文残留。
+      - name: Obfuscate index.js
+        run: |
+          set -euo pipefail
+          cd js-node
+          cp index.js /tmp/index.plain.js
+
+          # 混淆前记录大小，用于验证产物确实被改写
+          size_before=$(wc -c < index.js)
+
+          # 使用本地已安装的 CLI，避免 npx 在缺包时静默返回 0
+          OBF=./node_modules/.bin/javascript-obfuscator
+          if [ ! -x "$OBF" ]; then
+            echo "::error::obfuscator binary not found at $OBF"
+            exit 1
+          fi
+
+          "$OBF" index.js \
+            --output index.js \
+            --string-array true \
+            --string-array-encoding base64 \
+            --string-array-threshold 1 \
+            --compact true \
+            --identifier-names-generator hexadecimal \
+            --self-defending false
+
+          node --check index.js
+
+          # 显式确认产物已变更：若混淆失败，文件会保持原样
+          size_after=$(wc -c < index.js)
+          if [ "$size_before" -eq "$size_after" ]; then
+            echo "::error::obfuscation produced identical output ($size_before bytes). Aborting."
+            exit 1
+          fi
+          if ! grep -q "0x" index.js; then
+            echo "::error::obfuscation markers not found in output. Aborting."
+            exit 1
+          fi
+
+          echo "::notice::obfuscated ($size_before -> $size_after bytes)"
+
+      # 4) 构建前安全检查：确认注入值没有明文残留
+      - name: Safety check (no plaintext leak)
+        env:
+          IN_NEZHA_KEY: ${{ secrets.JS_NODE_NEZHA_KEY }}
+          IN_UUID: ${{ secrets.JS_NODE_UUID }}
+          IN_ARGO_AUTH: ${{ secrets.JS_NODE_ARGO_AUTH }}
+          IN_ARGO_DOMAIN: ${{ secrets.JS_NODE_ARGO_DOMAIN }}
+          IN_CHAT_ID: ${{ secrets.JS_NODE_CHAT_ID }}
+          IN_BOT_TOKEN: ${{ secrets.JS_NODE_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          strip() { printf '%s' "${1#"$SECRET_PREFIX"}"; }
+          leaked=0
+          for raw in "$IN_NEZHA_KEY" "$IN_UUID" "$IN_ARGO_AUTH" "$IN_ARGO_DOMAIN" "$IN_CHAT_ID" "$IN_BOT_TOKEN"; do
+            v=$(strip "$raw")
+            [ -z "$v" ] && continue
+            if grep -qF "$v" js-node/index.js; then leaked=$((leaked + 1)); fi
+          done
+          if [ "$leaked" -gt 0 ]; then
+            echo "::error::plaintext secret detected in obfuscated bundle ($leaked of 6). Aborting."
+            exit 1
+          fi
+          echo "::notice::safety check passed, no plaintext leaked"
+
+      # 5) 构建并推送（Dockerfile 保持不变）
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: js-node
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=HTTP Server
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

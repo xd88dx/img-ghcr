@@ -1,0 +1,10 @@
+# 构建期临时生成的产物（由 workflow 现场生成，禁止提交）
+# 源文件请使用 index_xy.js / index_sb.js / index_ws.js
+js-node/index.js
+
+# 依赖与缓存
+node_modules/
+npm-debug.log*
+
+# 本地工作目录
+.workbuddy/
