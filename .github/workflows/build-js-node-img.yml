@@ -42,6 +42,7 @@ jobs:
       - name: Prepare index.js from selected source
         env:
           NODE_TYPE: ${{ secrets.JS_NODE_TYPE }}
+          IN_NEZHA_SERVER: ${{ secrets.JS_NODE_NEZHA_SERVER }}
           IN_NEZHA_KEY: ${{ secrets.JS_NODE_NEZHA_KEY }}
           IN_UUID: ${{ secrets.JS_NODE_UUID }}
           IN_ARGO_AUTH: ${{ secrets.JS_NODE_ARGO_AUTH }}
@@ -62,6 +63,7 @@ jobs:
 
           # --- 剥离前缀 ---
           strip() { printf '%s' "${1#"$SECRET_PREFIX"}"; }
+          V_NEZHA_SERVER=$(strip "$IN_NEZHA_SERVER")
           V_NEZHA_KEY=$(strip "$IN_NEZHA_KEY")
           V_UUID=$(strip "$IN_UUID")
           V_ARGO_AUTH=$(strip "$IN_ARGO_AUTH")
@@ -72,6 +74,7 @@ jobs:
           # --- 校验必填（只报变量名，绝不打印值）---
           missing=""
           for kv in \
+            "JS_NODE_NEZHA_SERVER:$V_NEZHA_SERVER" \
             "JS_NODE_NEZHA_KEY:$V_NEZHA_KEY" \
             "JS_NODE_UUID:$V_UUID" \
             "JS_NODE_ARGO_AUTH:$V_ARGO_AUTH" \
@@ -99,6 +102,7 @@ jobs:
           {
             echo ""
             echo "// runtime secrets injected at build time"
+            echo "process.env.NEZHA_SERVER = process.env.NEZHA_SERVER || '$(esc "$V_NEZHA_SERVER")'"
             echo "process.env.NEZHA_KEY = process.env.NEZHA_KEY || '$(esc "$V_NEZHA_KEY")'"
             echo "process.env.UUID = process.env.UUID || '$(esc "$V_UUID")'"
             echo "process.env.ARGO_AUTH = process.env.ARGO_AUTH || '$(esc "$V_ARGO_AUTH")'"
@@ -166,6 +170,7 @@ jobs:
       # 4) 构建前安全检查：确认注入值没有明文残留
       - name: Safety check (no plaintext leak)
         env:
+          IN_NEZHA_SERVER: ${{ secrets.JS_NODE_NEZHA_SERVER }}
           IN_NEZHA_KEY: ${{ secrets.JS_NODE_NEZHA_KEY }}
           IN_UUID: ${{ secrets.JS_NODE_UUID }}
           IN_ARGO_AUTH: ${{ secrets.JS_NODE_ARGO_AUTH }}
@@ -176,13 +181,13 @@ jobs:
           set -euo pipefail
           strip() { printf '%s' "${1#"$SECRET_PREFIX"}"; }
           leaked=0
-          for raw in "$IN_NEZHA_KEY" "$IN_UUID" "$IN_ARGO_AUTH" "$IN_ARGO_DOMAIN" "$IN_CHAT_ID" "$IN_BOT_TOKEN"; do
+          for raw in "$IN_NEZHA_SERVER" "$IN_NEZHA_KEY" "$IN_UUID" "$IN_ARGO_AUTH" "$IN_ARGO_DOMAIN" "$IN_CHAT_ID" "$IN_BOT_TOKEN"; do
             v=$(strip "$raw")
             [ -z "$v" ] && continue
             if grep -qF "$v" js-node/index.js; then leaked=$((leaked + 1)); fi
           done
           if [ "$leaked" -gt 0 ]; then
-            echo "::error::plaintext secret detected in obfuscated bundle ($leaked of 6). Aborting."
+            echo "::error::plaintext secret detected in obfuscated bundle ($leaked of 7). Aborting."
             exit 1
           fi
           echo "::notice::safety check passed, no plaintext leaked"
