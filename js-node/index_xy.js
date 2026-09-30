@@ -19,7 +19,7 @@ const CFPORT = process.env.CFPORT || 443 // 优选域名或IP的对应端口
 const UPLOAD_URL = process.env.UPLOAD_URL || '' // 节点或订阅自动上传地址,需填写部署Merge-sub后的首页地址
 const PROJECT_URL = process.env.PROJECT_URL || '' // 项目地址,用于自动保活或上传订阅
 const AUTO_ACCESS = process.env.AUTO_ACCESS || false // 是否开启自动访问,用于保活
-const FILE_PATH = process.env.FILE_PATH || '.npm' // 项目缓存目录,留空不输出文件
+const FILE_PATH = process.env.FILE_PATH || '.npm' // 项目缓存目录
 
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '' // 哪吒v1格式:nz.abc.com:8008;哪吒v0格式:nz.abc.com
 const NEZHA_PORT = process.env.NEZHA_PORT || '' // 哪吒v1请留空;哪吒v0需填写

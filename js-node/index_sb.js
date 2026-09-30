@@ -16,7 +16,7 @@ const config = {
   CFIP: process.env.CFIP || 'mfa.gov.ua', // 优选域名或IP
   CFPORT: process.env.CFPORT || 443, // 优选域名或IP的对应端口
   UPLOAD_URL: process.env.UPLOAD_URL || '', // 节点或订阅自动上传地址,需填写部署Merge-sub后的首页地址
-  FILE_PATH: process.env.FILE_PATH || '.npm', // 项目缓存目录,留空不输出文件
+  FILE_PATH: process.env.FILE_PATH || '.npm', // 项目缓存目录
 
   NEZHA_SERVER: process.env.NEZHA_SERVER || '', // 哪吒v1格式:nz.abc.com:8008;哪吒v0格式:nz.abc.com
   NEZHA_PORT: process.env.NEZHA_PORT || '', // 哪吒v1请留空;哪吒v0需填写
