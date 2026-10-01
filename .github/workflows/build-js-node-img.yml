@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       pushdkhub:
-        description: '是否推送到 Docker Hub（y = 推送，n = 只推 GHCR）'
+        description: '是否推送 Docker Hub'
         required: false
         type: choice
         default: 'n'
