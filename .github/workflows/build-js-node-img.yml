@@ -11,6 +11,14 @@ on:
         description: 'Docker Tag Name'
         required: true
         type: string
+      pushdkhub:
+        description: '是否推送到 Docker Hub（y = 推送，n = 只推 GHCR）'
+        required: false
+        type: choice
+        default: 'n'
+        options:
+          - y
+          - n
 
 env:
   # 本工作流使用的 Secret 前缀。多工作流共存时用于区分归属。
@@ -30,6 +38,8 @@ jobs:
       OWNER: ${{ github.repository_owner }}
       IMAGE: ${{ inputs.image }}
       TAG: ${{ inputs.tag }}
+      # 未显式传值时回退为 n（通过 API/gh CLI 触发可能不带该输入）
+      PUSH_DH: ${{ inputs.pushdkhub || 'n' }}
 
     steps:
       - name: Checkout repository
@@ -41,14 +51,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      # 未配置 DOCKERHUB_USERNAME 时静默跳过，不影响原有 GHCR 流程
-      - name: Log in to Docker Hub
-        if: env.DH_USER != ''
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -207,11 +209,17 @@ jobs:
           fi
           echo "::notice::safety check passed, no plaintext leaked"
 
-      # 4.5) 计算 tag 列表。Docker Hub 用户名未配置时只推 GHCR，避免推到空用户名地址
+      # 4.5) 校验 pushdkhub 并计算 tag 列表
       - name: Compute image tags
         id: tags
         run: |
           set -euo pipefail
+
+          # --- 校验 pushdkhub：只接受 y / n ---
+          case "$PUSH_DH" in
+            y|n) ;;
+            *) echo "::error::pushdkhub 只能是 y 或 n，当前为 '$PUSH_DH'"; exit 1 ;;
+          esac
 
           # tag 会被拼进 build-push-action 的 tags，先做字符白名单校验
           for v in "$IMAGE" "$TAG"; do
@@ -221,13 +229,24 @@ jobs:
           done
 
           ghcr="ghcr.io/$OWNER/$IMAGE:$TAG"
-          if [ -n "$DH_USER" ]; then
-            printf 'tags=%s,docker.io/%s/%s:%s\n' "$ghcr" "$DH_USER" "$IMAGE" "$TAG" >> "$GITHUB_OUTPUT"
-            echo "::notice::targets: ghcr.io + docker.io/$DH_USER"
-          else
+          if [ "$PUSH_DH" = "n" ]; then
             printf 'tags=%s\n' "$ghcr" >> "$GITHUB_OUTPUT"
-            echo "::warning::DOCKERHUB_USERNAME not set, pushing to ghcr.io only"
+            echo "::notice::pushdkhub=n, pushing to ghcr.io only"
+          elif [ -z "$DH_USER" ]; then
+            echo "::error::pushdkhub=y 但未配置 secret DOCKERHUB_USERNAME"
+            exit 1
+          else
+            printf 'tags=%s,docker.io/%s/%s:%s\n' "$ghcr" "$DH_USER" "$IMAGE" "$TAG" >> "$GITHUB_OUTPUT"
+            echo "::notice::pushdkhub=y, targets: ghcr.io + docker.io/$DH_USER"
           fi
+
+      # 4.6) 仅在确定要推 Docker Hub 时登录（此时 DOCKERHUB_USERNAME 已确认非空）
+      - name: Log in to Docker Hub
+        if: env.PUSH_DH == 'y'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # 5) 构建并推送（Dockerfile 保持不变）
       - name: Build and push Docker image
